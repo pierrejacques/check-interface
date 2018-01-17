@@ -3,68 +3,26 @@ const error = (where, what) => {
     throw new Error(`${where} error in check-interface, ${what}`);
 };
 
+
 // module typeChecker
-const typeChecker = (() => {
-    const isObjectType = (type, obj) => Object.prototype.toString.call(obj) === `[object ${type}]`;
-    const isNormalType = (type, obj) => typeof val === type.toLowerCase();
-    const is = {
-        Number(val) {
-            return isObjectType('Number', val) || isNormalType('Number', val);
-        },
-        String(val) {
-            return isObjectType('String', val) || isNormalType('String', val);
-        },
-        Boolean(val) {
-            return isObjectType('Boolean', val) || isNormalType('Boolean', val);
-        },
-        Undefined(val) {
-            return isNormalType('Undefined', val);
-        },
-        Null(val) {
-            return isNormalType('Null', val);
-        },
-        Symbol(val) {
-            return isNormalType('Symbol', val);
-        },
-        Object(val) {
-            return isObjectType('Object', val);
-        },
-        Iteratable(val) {
-            return this.Array(val) || this.Set(val) || this.Map(val);
-        },
-        Array(val) {
-            return isObjectType('Array', val);
-        },
-        Set() {
-            return isObjectType('Set', val);
-        },
-        Map() {
-            return isObjectType('Map', val);
-        },
-    };
-    const typeSet = new Set(Object.keys(is));
-
-    return {
-        check(types, val) {
-            let flag = false;
-            [...types].forEach(type => {
-                flag = flag || is[type](val);
-            });
-            return flag;
-        },
-        has(type) {
-            return typeSet.has(type);
+const typeChecker = (types, val) => {
+    let flag = false;
+    [...types].forEach(type => {
+        if (type === null || type === undefined) {
+            flag = flag || val === type;
+        } else {
+            flag = flag || val.__proto__.constructor === type;
         }
-    };
-})();
-
+    });
+    return flag;
+};
 
 
 // module syntaxChecker
 const syntaxChecker = (objIn) => {
     // check whole object
     const obj = objIn;
-    if (!typeChecker.check(['Object'], obj)) {
+    if (!typeChecker([Object], obj)) {
         error('Syntax', 'config object must be an object');
         return false;
     }
@@ -72,7 +30,7 @@ const syntaxChecker = (objIn) => {
     // check $type present
     let type = obj.$type;
     if (obj.$template && !type) {
-        type = 'Object';
+        type = Object;
     }
     if (!type) {
         error('Syntax', '$type must be presented while $template is absent');
@@ -80,52 +38,23 @@ const syntaxChecker = (objIn) => {
     }
 
     // check $type type
-    if (typeChecker.check(['String'], type)) {
-        types = new Set([type]);
-    } else if (typeChecker.check(['Iteratable'], type)) {
+    if (typeChecker([Array], type)) {
         types = new Set(type);
     } else {
-        error('Syntax', 'wrong type of $type');
-        return false;
-    }
-    let toReturn = false;
-    types.forEach(type => {
-        if (!typeChecker.has(type)) {
-            error('Syntax', `unknown $type "${type}"`);
-            toReturn = true;
-        }
-    });
-    if (toReturn) {
-        return false;
+        types = new Set([type]);
     }
 
-    // reassign $type
     obj.$type = types;
 
-
     if (obj.$template) {
-        // check $type with $template
-        const templatableTypes = new Set(['Object', 'Iteratable', 'Set', 'Map', 'Array']);
-        let flag = false;
-        types.forEach(type => {
-            if (templatableTypes.has(type)) {
-                flag = true;
-            }
-        });
-        if (!flag) {
-            error('Syntax', `provided $type doesn't support $template`);
-            return false;
-        }
-
         // check isIterable
         let isObject = false;
         let isIteratable = false;
-        templatableTypes.delete('Object');
         types.forEach(type => {
-            if (type === 'Object') {
+            if (type === Object) {
                 isObject = true;
             }
-            if (templatableTypes.has(type)) {
+            if ((new type)[Symbol.iterator]) {
                 isIteratable = true;
             }
         });
@@ -138,7 +67,7 @@ const syntaxChecker = (objIn) => {
 
 
     // check $default
-    if (obj.$default !== undefined && !typeChecker.check(types, obj.$default)) {
+    if (obj.$default !== undefined && !typeChecker(types, obj.$default)) {
         error('Syntax', '$default and $type unmatched');
         return false;
     }
@@ -146,11 +75,12 @@ const syntaxChecker = (objIn) => {
     return obj;
 };
 
+
 const syntaxRecurseChecker = (obj) => {
     syntaxChecker(obj);
     if (obj.$template) {
         Object.keys(obj.$template).forEach(key => {
-            syntaxChecker(obj.$template[key]);
+            syntaxRecurseChecker(obj.$template[key]);
         })
     }
 };
@@ -169,7 +99,7 @@ const checkKeys = (obj, config) => {
 
 const checkObject = (obj, config) => {
     console.log(config);
-    let result = typeChecker.check(config.$type, obj);
+    let result = typeChecker(config.$type, obj);
     (config.$before || (() => {}))(obj, result);
     if (config.$template) {
         if (config.$iteratable) {
@@ -207,50 +137,56 @@ class Checker {
 const checker1 = new Checker({
     $template: {
         className: {
-            $type: 'String',
+            $type: String,
             $default: 'DefaultName',
-            $before(val) {
-                console.log('error!');
+            $before() {
+                console.log('before!');
             },
+            $after() {
+                console.log('after!');
+            }
         },
         info: {
-            $type: 'Object',
+            $type: Object,
             $template: {
                 year: {
-                    $type: 'String',
+                    $type: String,
                     $default: '2018',
                 },
                 region: {
-                    $type: 'String',
+                    $type: String,
                     $default: 'Shanghai',
                 },
             },
         },
         childrens: {
-            $type: 'Array',
+            $type: Array,
             $len: '@para1',
             $default: [],
             $template: {
                 name: {
-                    $type: 'String',
+                    $type: String,
                 },
                 age: {
-                    $type: 'Number',
+                    $type: Number,
                 },
             },
         },
         parents: {
-            $type: 'Array',
+            $type: Array,
             $len: '@para1',
             $default: [],
             $template: {
                 name: {
-                    $type: 'String',
+                    $type: String,
                 },
                 age: {
-                    $type: 'Number',
+                    $type: Number,
                     $before() {
-                        console.log('error!');
+                        console.log('before!');
+                    },
+                    $after() {
+                        console.log('after!');
                     }
                 }
             }
